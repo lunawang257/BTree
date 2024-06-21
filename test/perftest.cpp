@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <sstream>
 #include "test_statistics.h"
+#include <stdio.h>
 
 TEST_CASE("perftest") {
   namespace fc = frozenca;

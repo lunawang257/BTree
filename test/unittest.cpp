@@ -13,6 +13,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <thread>
+#include <mutex>
 
 #include "fc/btree.h"
 
@@ -226,4 +228,60 @@ TEST_CASE("count()") {
   REQUIRE(btree2.count(1) == 2);
   REQUIRE(btree2.count(0) == 0);
   REQUIRE(btree2.count(2) == 0);
+}
+
+typedef int value_t;
+std::mutex mtx;
+
+void worker(fc::BTreeSet<value_t> *btreep, int numOp, float insertPercent, int minValSize, int maxValSize) {
+  fc::BTreeSet<value_t>& btree = *btreep;
+  std::vector<value_t> inserted;
+  std::uniform_real_distribution<double> insertRand(0.0,1.0);
+  std::default_random_engine gen;
+  for (int i = 0; i < numOp; i++) {
+    double num = insertRand(gen);
+    mtx.lock();
+    if (num < insertPercent) {
+      std::uniform_int_distribution<value_t> valRand(minValSize, maxValSize);
+      value_t randNum = valRand(gen);
+      REQUIRE_NOTHROW(btree.insert(randNum));
+      inserted.push_back(randNum);
+    } else {
+      if (!btree.empty() && !inserted.empty()) {
+        std::uniform_int_distribution<int> valRand(0, inserted.size() - 1);
+        int toDelete = valRand(gen);
+        value_t temp = inserted[inserted.size() - 1];
+        inserted[inserted.size() - 1] = inserted[toDelete];
+        inserted[toDelete] = temp;
+        REQUIRE_NOTHROW(btree.erase(inserted[inserted.size() - 1]));
+        inserted.pop_back();
+      }
+    }
+    mtx.unlock();
+  }
+}
+
+std::chrono::duration<double> runThreadTest(int numThreads, int numOp, float insertPercent, int minValSize, int maxValSize) {
+  fc::BTreeSet<value_t> btree;
+  std::vector<std::thread*> threads;
+  std::default_random_engine gen;
+  const auto start = std::chrono::steady_clock::now();
+
+  for (int i = 0; i < numThreads; i++) {
+    threads.push_back(new std::thread(worker, &btree, numOp, insertPercent, minValSize, maxValSize));
+    //threads.push_back(new std::thread(w2, numInserts, numErase, insertPercent, minValSize, maxValSize));
+    //threads.push_back(new std::thread(w3, &btree));
+  }
+
+  for (auto& t : threads) {
+    t->join();
+  }
+  const auto end = std::chrono::steady_clock::now();
+  return end - start;
+}
+
+TEST_CASE("concurrency") {
+  // int numThreads, int numOp, float insertPercent, int minValSize, int maxValSize
+  //REQUIRE(0);
+  REQUIRE_NOTHROW(runThreadTest(1, 100000, 0.5, 1000, 100000));
 }
